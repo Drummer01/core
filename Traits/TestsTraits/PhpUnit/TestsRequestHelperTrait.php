@@ -19,13 +19,20 @@ use Vinkla\Hashids\Facades\Hashids;
  */
 trait TestsRequestHelperTrait
 {
-
     /**
      * property to be set on the user test class
      *
      * @var  string
      */
     protected $endpoint = '';
+
+    /**
+     * route url parameters
+     *
+     * @var array
+     */
+    protected $routeParams = [];
+
 
     /**
      * property to be set on the user test class
@@ -75,19 +82,17 @@ trait TestsRequestHelperTrait
      * @param array $headers
      *
      * @throws \App\Ship\Exceptions\UndefinedMethodException
-     * 
+     *
      * @return \Illuminate\Foundation\Testing\TestResponse
      */
-    public function makeCall(array $data = [], array $headers = [])
+    public function makeCall(array $data = [], array $headers = [], $callApi = true)
     {
+        //Get route url with injected url params and http verb
+        list($verb, $url) = $this->parseEndpoint();
+
         // Get or create a testing user. It will get your existing user if you already called this function from your
         // test. Or create one if you never called this function from your tests "Only if the endpoint is protected".
         $this->getTestingUser();
-
-        // read the $endpoint property from the test and set the verb and the uri as properties on this trait
-        $endpoint = $this->parseEndpoint();
-        $verb = $endpoint['verb'];
-        $url = $endpoint['url'];
 
         // validating user http verb input + converting `get` data to query parameter
         switch ($verb) {
@@ -106,6 +111,53 @@ trait TestsRequestHelperTrait
         $httpResponse = $this->json($verb, $url, $data, $headers);
 
         return $this->setResponseObjectAndContent($httpResponse);
+    }
+
+    /**
+     * Adds url parameter to be later used in route url generation
+     *
+     * @param $value
+     * @param string $key
+     * @param bool $skipEncoding
+     * @return $this
+     */
+    public function injectUrlParam($value, $key = 'id', $skipEncoding = false)
+    {
+        $this->routeParams[$key] = $this->hashRouteId($value);
+
+        return $this;
+    }
+
+    /**
+     * Add multiple params at once
+     *
+     * Example: $this->injectUrlParams(['id' => 1, 'custom_id' => 2])
+     *
+     * @param $keys
+     * @param bool $skipEncoding
+     * @return $this
+     */
+    public function injectUrlParams(array $keys, $skipEncoding = true)
+    {
+        foreach ($keys as $key => $value) {
+            $this->injectUrlParam($value, $key, $skipEncoding);
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return array
+     */
+    protected function parseEndpoint()
+    {
+        $delimiter = '@';
+        list($verb, $routeName) = explode($delimiter, $this->getEndpoint(), 2);
+
+        return [
+            $verb,
+            route($routeName, $this->routeParams)
+        ];
     }
 
     /**
@@ -157,30 +209,9 @@ trait TestsRequestHelperTrait
     }
 
     /**
-     * Inject the ID in the Endpoint URI before making the call by
-     * overriding the `$this->endpoint` property
-     *
-     * Example: you give it ('users/{id}/stores', 100) it returns 'users/100/stores'
-     *
-     * @param        $id
-     * @param bool   $skipEncoding
-     * @param string $replace
-     *
-     * @return  $this
-     */
-    public function injectId($id, $skipEncoding = false, $replace = '{id}')
-    {
-        // In case Hash ID is enabled it will encode the ID first
-        $id = $this->hashEndpointId($id, $skipEncoding);
-        $this->endpoint = str_replace($replace, $id, $this->endpoint);
-
-        return $this;
-    }
-
-    /**
      * Override the default class endpoint property before making the call
      *
-     * to be used as follow: $this->endpoint('verb@uri')->makeCall($data);
+     * to be used as follow: $this->endpoint('verb@route_name')->makeCall($data);
      *
      * @param $endpoint
      *
@@ -200,6 +231,7 @@ trait TestsRequestHelperTrait
     {
         return !is_null($this->overrideEndpoint) ? $this->overrideEndpoint : $this->endpoint;
     }
+
 
     /**
      * Override the default class auth property before making the call
@@ -223,22 +255,6 @@ trait TestsRequestHelperTrait
     public function getAuth()
     {
         return !is_null($this->overrideAuth) ? $this->overrideAuth : $this->auth;
-    }
-
-    /**
-     * @param $uri
-     *
-     * @return  string
-     */
-    private function buildUrlForUri($uri)
-    {
-        $apiUrl = Config::get('apiato.api.url');
-
-        if (!Str::endsWith($apiUrl, '/')) {
-            $apiUrl .= '/';
-        }
-
-        return $apiUrl . Config::get('apiato.api.prefix') . $uri;
     }
 
     /**
@@ -301,37 +317,9 @@ trait TestsRequestHelperTrait
      *
      * @return  mixed
      */
-    private function hashEndpointId($id, $skipEncoding = false)
+    private function hashRouteId($id, $skipEncoding = false)
     {
         return (Config::get('apiato.hash-id') && !$skipEncoding) ? Hashids::encode($id) : $id;
-    }
-
-    /**
-     * read `$this->endpoint` property from the test class (`verb@uri`) and convert it to usable data
-     *
-     * @return  array
-     */
-    private function parseEndpoint()
-    {
-        $this->validateEndpointExist();
-
-        $separator = '@';
-
-        $this->validateEndpointFormat($separator);
-
-        // convert the string to array
-        $asArray = explode($separator, $this->getEndpoint(), 2);
-
-        // get the verb and uri values from the array
-        extract(array_combine(['verb', 'uri'], $asArray));
-        /** @var TYPE_NAME $verb */
-        /** @var TYPE_NAME $uri */
-
-        return [
-            'verb' => $verb,
-            'uri'  => $uri,
-            'url'  => $this->buildUrlForUri($uri),
-        ];
     }
 
     /**
